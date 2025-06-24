@@ -16,14 +16,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install dependencies (using npm install instead of ci)
+RUN npm install --only=production
 
 # Copy application files
 COPY . .
-
-# Set Google Cloud environment variables
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/service-account-key.json
 
 # Expose port
 EXPOSE 8080
