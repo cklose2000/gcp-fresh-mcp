@@ -7,9 +7,30 @@ import { ProjectsClient } from '@google-cloud/resource-manager';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
+// Secret token for MCP endpoint protection
+const MCP_SECRET = process.env.MCP_SECRET || 'change-this-secret-token';
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Middleware to check secret on MCP endpoints
+app.use('/mcp', (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  
+  // Skip check for OAuth endpoints (they come first)
+  if (req.path.includes('authorize') || req.path.includes('token') || req.path.includes('register')) {
+    return next();
+  }
+  
+  // Check secret for MCP endpoints
+  if (authHeader !== `Bearer ${MCP_SECRET}`) {
+    console.log('Unauthorized access attempt from:', req.ip);
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  next();
+});
 
 // Initialize Google Cloud clients
 const bigquery = new BigQuery();
@@ -445,9 +466,9 @@ async function handleGCPTool(toolName, args) {
         
         return {
           content: [{
-              type: "text",
-              text: `Accessible GCP Projects:\n${projectList.map(p => `- ${p.id} "${p.displayName}" (${p.state})`).join('\n')}`
-            }]
+            type: "text",
+            text: `Accessible GCP Projects:\n${projectList.map(p => `- ${p.id} "${p.displayName}" (${p.state})`).join('\n')}`
+          }]
         };
       }
       
