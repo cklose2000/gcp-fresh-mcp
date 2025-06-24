@@ -1,0 +1,33 @@
+# This file specifies files that gcloud will ignore while uploading
+
+.gcloudignore
+.git
+.gitignore
+
+# Node.js dependencies
+node_modules/
+
+# IDE files
+.vscode/
+.idea/
+
+# Documentation
+README.md
+LICENSE
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+test/
+tests/
+*.test.js
+*.spec.js
