@@ -2,9 +2,9 @@
 
 A Model Context Protocol (MCP) server designed for Google Cloud Platform deployment with built-in OAuth flow support for Claude Code integration.
 
-## 🚀 Version 2.0 - Now with Real GCP Tools + Secret Token Security!
+## 🚀 Version 3.0 - Enhanced BigQuery Capabilities + Full GCP Control!
 
-This MCP server now provides comprehensive control over your Google Cloud Platform resources through Claude Code with enterprise-grade security.
+This MCP server now provides comprehensive control over your Google Cloud Platform resources through Claude Code with enterprise-grade security and **full BigQuery capabilities including Jobs API, Sessions, Stored Procedures, and more!**
 
 ## 🔐 Security Features
 
@@ -20,13 +20,40 @@ This MCP server now provides comprehensive control over your Google Cloud Platfo
 - **JSON-RPC 2.0 Compliant**: Properly formatted responses for MCP protocol compatibility
 - **Cloud Run Ready**: Designed for easy deployment on Google Cloud Platform
 - **Comprehensive GCP Control**: Tools for BigQuery, Cloud Storage, Compute Engine, Cloud Run, and more
+- **Enhanced BigQuery Features**: Jobs API, Sessions, Stored Procedures, Data Loading/Export, Streaming
 - **Secure by Default**: Built-in safety checks and permission controls
 
 ## Available GCP Tools
 
-### BigQuery
+### Enhanced BigQuery Tools (NEW!)
+
+#### Jobs API & Async Operations
+- `bq_create_query_job` - Create async query jobs with advanced options (dry run, destination tables, priority)
+- `bq_get_job` - Get job status and retrieve results
+- `bq_cancel_job` - Cancel running jobs
+- `bq_list_jobs` - List all BigQuery jobs with filtering
+
+#### Session Management
+- `bq_create_session` - Create sessions for stateful operations
+- `bq_query_with_session` - Execute queries within a session (temp tables, variables)
+
+#### Stored Procedures & Scripts
+- `bq_execute_procedure` - Execute stored procedures with proper parameter type handling
+- `bq_execute_script` - Execute multiple SQL statements as a transaction/script
+
+#### Data Operations
+- `bq_load_data` - Load data from Cloud Storage (CSV, JSON, AVRO, PARQUET)
+- `bq_export_data` - Export tables to Cloud Storage
+- `bq_stream_insert` - Stream insert rows with deduplication
+- `bq_copy_table` - Copy tables between datasets
+
+#### Schema & Metadata
+- `bq_get_table_schema` - Get detailed table schema and metadata
+- `bq_get_routine_definition` - Get stored procedure/function definitions
+
+#### Legacy BigQuery Tools (Still Available)
 - `bq_list_datasets` - List all BigQuery datasets
-- `bq_query` - Execute SQL queries
+- `bq_query` - Execute SQL queries (simple mode)
 - `bq_create_dataset` - Create new datasets
 - `bq_list_tables` - List tables in a dataset
 
@@ -85,7 +112,7 @@ MCP_SECRET=$(openssl rand -hex 32)
 echo "Your secret: $MCP_SECRET"  # Save this!
 
 # Set variables
-TAG=2.0.1
+TAG=3.0.0
 PROJECT=$(gcloud config get-value project)
 REGION=us-central1
 
@@ -119,25 +146,85 @@ Replace `YOUR_SECRET_TOKEN` with the token generated during deployment.
 
 Once connected in Claude Code:
 
+### Enhanced BigQuery Operations
 ```
-# BigQuery operations
+# Async query execution
+"Create a BigQuery job to analyze last month's sales data with results written to analytics.monthly_summary"
+
+# Stored procedures
+"Execute the stored procedure calculate_customer_lifetime_value with parameters customer_id='12345' and end_date='2025-06-01'"
+
+# Session-based operations
+"Create a BigQuery session and create temporary tables for my analysis"
+
+# Data loading
+"Load the CSV file gs://my-data/sales_2025.csv into dataset.sales_table with auto-detected schema"
+
+# Streaming inserts
+"Stream insert these 5 new customer records into the customers table"
+
+# Export operations
+"Export the processed_data table to gs://my-exports/data.parquet in Parquet format with gzip compression"
+```
+
+### Legacy BigQuery Operations
+```
+# Standard queries
 "List my BigQuery datasets"
 "Run query: SELECT COUNT(*) FROM `project.dataset.table`"
 "Create a new dataset called analytics_temp"
+```
 
-# Cloud Storage operations
+### Cloud Storage Operations
+```
 "Show me all my storage buckets"
 "List files in bucket my-data-bucket"
 "Read the config.json file from my-config-bucket"
+```
 
-# Compute Engine operations
+### Compute Engine Operations
+```
 "List all VM instances in zone us-central1-a"
 "Stop instance web-server-1 in zone us-central1-a"
+```
 
-# Multi-service workflows
+### Multi-service Workflows
+```
 "Show me all my GCP projects"
 "List Cloud Run services in us-central1"
 "Execute gcloud command: config get-value project"
+```
+
+## Advanced BigQuery Examples
+
+### Working with Jobs API
+```
+# Create a dry run query to estimate costs
+"Do a dry run of this query: SELECT * FROM bigquery-public-data.samples.shakespeare"
+
+# Monitor long-running jobs
+"Check the status of job ID bqjob_r123456789"
+
+# Cancel a job
+"Cancel the running job bqjob_r987654321"
+```
+
+### Session Management
+```
+# Create a session for complex analysis
+"Create a BigQuery session for my data analysis workflow"
+
+# Use temporary tables
+"In my session, create a temp table with top customers and then join it with orders"
+```
+
+### Stored Procedures
+```
+# Execute procedures with complex parameters
+"Call the ETL procedure sp_process_daily_data with date='2025-06-01' and mode='FULL'"
+
+# Execute multi-statement scripts
+"Run this script: CREATE TEMP TABLE x AS ...; UPDATE dataset.table SET ...; INSERT INTO ..."
 ```
 
 ## Security
@@ -164,6 +251,23 @@ Once connected in Claude Code:
 | `GOOGLE_CLOUD_PROJECT` | Default GCP project | Optional |
 | `PORT` | Service port (auto-set by Cloud Run) | No |
 
+## Required GCP Permissions
+
+The service account needs these roles:
+- **BigQuery**:
+  - `bigquery.dataEditor` - For data operations
+  - `bigquery.jobUser` - For creating jobs
+  - `bigquery.user` - For running queries
+- **Cloud Storage**:
+  - `storage.objectViewer` - For reading files
+  - `storage.legacyBucketReader` - For listing buckets
+- **Compute Engine**:
+  - `compute.instanceAdmin` - For instance management
+- **Cloud Run**:
+  - `run.viewer` - For listing services
+- **Resource Manager**:
+  - `resourcemanager.projectsViewer` - For listing projects
+
 ## Verification
 
 Test your deployment:
@@ -184,24 +288,23 @@ curl -H "Authorization: Bearer YOUR_SECRET" https://your-url/mcp
 ## Architecture
 
 ```
-┌─────────────────┐      OAuth Flow     ┌─────────────────┐
-│                 │ ←──────────────────→ │                 │
-│   Claude Code   │                     │   MCP Server    │
-│                 │ ←──────────────────→ │  (Cloud Run)   │
-└─────────────────┘     JSON-RPC 2.0     └─────────────────┘
-                        over HTTP                │
+┌──────────────────┐       OAuth Flow     ┌──────────────────┐
+│                  │ ←─────────────────────→ │                  │
+│   Claude Code    │                         │   MCP Server     │
+│                  │ ←─────────────────────→ │  (Cloud Run)     │
+└──────────────────┘      JSON-RPC 2.0      └──────────────────┘
+                         over HTTP                │
                                                  │
                                                  ▼
-                ┌──────────────────────────────────────────────────┐
-                │           Google Cloud Platform             │
-                │ ┌──────────┐ ┌────────────────┐ │
-                │ │BigQuery  │ │Cloud Storage│ │
-                │ └──────────┘ └────────────────┘ │
-                │ ┌──────────┐ ┌────────────────┐ │
-                │ │Compute   │ │   Cloud Run    │ │
-                │ │ Engine   │ │                │ │
-                │ └──────────┘ └────────────────┘ │
-                └──────────────────────────────────────────────────┘
+        ┌────────────────────────────────────────────────────────────────────────┐
+        │                    Google Cloud Platform                               │
+        │ ┌──────────┐ ┌────────────────┐ ┌────────────────┐ ┌────────────────┐│
+        │ │BigQuery  │ │Cloud Storage   │ │Compute Engine  │ │   Cloud Run    ││
+        │ │- Jobs    │ │                │ │                │ │                ││
+        │ │- Sessions│ │                │ │                │ │                ││
+        │ │- Procs   │ │                │ │                │ │                ││
+        │ └──────────┘ └────────────────┘ └────────────────┘ └────────────────┘│
+        └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Troubleshooting
@@ -215,6 +318,12 @@ curl -H "Authorization: Bearer YOUR_SECRET" https://your-url/mcp
 - Make sure OAuth completed successfully first
 - Verify the header format in your configuration
 - Check Cloud Run logs for detailed error messages
+
+### BigQuery stored procedures failing
+- Ensure proper parameter types are specified
+- Check that the procedure exists in the specified dataset
+- Verify the service account has execute permissions
+- Use `bq_get_job` to check detailed error messages
 
 ### Can't access OAuth endpoints
 - OAuth endpoints should work without the secret
@@ -230,4 +339,4 @@ MIT License - see LICENSE file for details
 
 ## Acknowledgments
 
-Built with the goal of providing maximum GCP control through Claude Code's MCP interface with enterprise-grade security.
+Built with the goal of providing maximum GCP control through Claude Code's MCP interface with enterprise-grade security and full BigQuery capabilities.
