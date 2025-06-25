@@ -1,0 +1,56 @@
+# Cloud Build configuration for automatic deployment
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/mcp-server:${SHORT_SHA}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/mcp-server:latest'
+      - '.'
+
+  # Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/mcp-server'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/mcp-server:${SHORT_SHA}'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--cpu'
+      - '1'
+      - '--memory'
+      - '512Mi'
+      - '--max-instances'
+      - '10'
+      - '--timeout'
+      - '300'
+      - '--set-env-vars'
+      - 'MCP_SECRET=${_MCP_SECRET}'
+
+# Substitution variables (configure these in Cloud Console)
+substitutions:
+  _REGION: us-central1
+  _REPOSITORY: mcp
+  _SERVICE_NAME: mcp-fresh-server
+  _MCP_SECRET: ${_MCP_SECRET} # This will be set as a secure variable
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+# Service account for Cloud Build (optional - uses default if not specified)
+# serviceAccount: 'projects/${PROJECT_ID}/serviceAccounts/cloudbuild@${PROJECT_ID}.iam.gserviceaccount.com'
