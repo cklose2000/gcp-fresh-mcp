@@ -7,6 +7,9 @@ import { ProjectsClient } from '@google-cloud/resource-manager';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
+// Import enhanced BigQuery functions
+import * as bqEnhanced from './bigquery-enhanced.js';
+
 // Secret token for MCP endpoint protection
 const MCP_SECRET = process.env.MCP_SECRET || 'change-this-secret-token';
 
@@ -112,8 +115,17 @@ app.get("/mcp", (req, res) => {
 // GCP Tool handler
 async function handleGCPTool(toolName, args) {
   try {
+    // Enhanced BigQuery tools
+    if (toolName.startsWith('bq_') && bqEnhanced[toolName]) {
+      // Ensure projectId is set
+      if (!args.projectId) {
+        args.projectId = await getProjectId();
+      }
+      return await bqEnhanced[toolName](args);
+    }
+    
     switch (toolName) {
-      // BigQuery tools
+      // Legacy BigQuery tools (keep for compatibility)
       case "bq_list_datasets": {
         const projectId = await getProjectId(args.projectId);
         const [datasets] = await bigquery.getDatasets({ projectId });
@@ -542,14 +554,495 @@ app.post("/mcp", async (req, res) => {
         },
         serverInfo: {
           name: "gcp-mcp",
-          version: "2.0.0",
-          description: "GCP MCP Server with comprehensive platform control"
+          version: "3.0.0",
+          description: "GCP MCP Server with comprehensive platform control and enhanced BigQuery capabilities"
         }
       };
     } else if (method === "tools/list") {
       response.result = {
         tools: [
-          // BigQuery Tools
+          // Enhanced BigQuery Tools
+          {
+            name: "bq_create_query_job",
+            description: "Create an async BigQuery query job with advanced options",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { 
+                  type: "string",
+                  description: "SQL query to execute"
+                },
+                projectId: { 
+                  type: "string",
+                  description: "GCP Project ID (optional)"
+                },
+                location: {
+                  type: "string",
+                  description: "Query location (default: US)"
+                },
+                destinationTable: {
+                  type: "string",
+                  description: "Table name to write results to"
+                },
+                destinationDataset: {
+                  type: "string",
+                  description: "Dataset for destination table"
+                },
+                writeDisposition: {
+                  type: "string",
+                  enum: ["WRITE_TRUNCATE", "WRITE_APPEND", "WRITE_EMPTY"],
+                  description: "How to write results"
+                },
+                timeoutMs: {
+                  type: "string",
+                  description: "Job timeout in milliseconds"
+                },
+                dryRun: {
+                  type: "boolean",
+                  description: "Validate query without executing"
+                },
+                useLegacySql: {
+                  type: "boolean",
+                  description: "Use legacy SQL syntax"
+                },
+                priority: {
+                  type: "string",
+                  enum: ["INTERACTIVE", "BATCH"],
+                  description: "Query priority"
+                }
+              },
+              required: ["query"]
+            }
+          },
+          {
+            name: "bq_get_job",
+            description: "Get status and results of a BigQuery job",
+            inputSchema: {
+              type: "object",
+              properties: {
+                jobId: { 
+                  type: "string",
+                  description: "Job ID to check"
+                },
+                getResults: {
+                  type: "boolean",
+                  description: "Retrieve query results if available"
+                },
+                maxResults: {
+                  type: "number",
+                  description: "Max results to return"
+                }
+              },
+              required: ["jobId"]
+            }
+          },
+          {
+            name: "bq_cancel_job",
+            description: "Cancel a running BigQuery job",
+            inputSchema: {
+              type: "object",
+              properties: {
+                jobId: { 
+                  type: "string",
+                  description: "Job ID to cancel"
+                }
+              },
+              required: ["jobId"]
+            }
+          },
+          {
+            name: "bq_create_session",
+            description: "Create a BigQuery session for stateful operations",
+            inputSchema: {
+              type: "object",
+              properties: {
+                projectId: { 
+                  type: "string",
+                  description: "GCP Project ID (optional)"
+                },
+                location: {
+                  type: "string",
+                  description: "Session location (default: US)"
+                }
+              }
+            }
+          },
+          {
+            name: "bq_query_with_session",
+            description: "Execute query within a BigQuery session",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: { 
+                  type: "string",
+                  description: "SQL query to execute"
+                },
+                sessionId: {
+                  type: "string",
+                  description: "Session ID to use"
+                },
+                location: {
+                  type: "string",
+                  description: "Query location"
+                }
+              },
+              required: ["query", "sessionId"]
+            }
+          },
+          {
+            name: "bq_execute_procedure",
+            description: "Execute a stored procedure with proper parameter handling",
+            inputSchema: {
+              type: "object",
+              properties: {
+                procedureName: { 
+                  type: "string",
+                  description: "Procedure name"
+                },
+                datasetId: {
+                  type: "string",
+                  description: "Dataset containing the procedure"
+                },
+                projectId: {
+                  type: "string",
+                  description: "GCP Project ID"
+                },
+                parameters: {
+                  type: "array",
+                  description: "Array of parameters with {value, type, name}",
+                  items: {
+                    type: "object",
+                    properties: {
+                      value: { type: ["string", "number", "boolean", "array", "object"] },
+                      type: { type: "string" },
+                      name: { type: "string" }
+                    }
+                  }
+                },
+                location: {
+                  type: "string",
+                  description: "Procedure location"
+                },
+                timeoutMs: {
+                  type: "string",
+                  description: "Execution timeout"
+                },
+                waitForCompletion: {
+                  type: "boolean",
+                  description: "Wait for procedure to complete"
+                }
+              },
+              required: ["procedureName", "datasetId", "projectId"]
+            }
+          },
+          {
+            name: "bq_execute_script",
+            description: "Execute multiple SQL statements as a script",
+            inputSchema: {
+              type: "object",
+              properties: {
+                statements: { 
+                  type: "array",
+                  description: "Array of SQL statements",
+                  items: { type: "string" }
+                },
+                projectId: {
+                  type: "string",
+                  description: "GCP Project ID"
+                },
+                sessionId: {
+                  type: "string",
+                  description: "Optional session ID"
+                },
+                location: {
+                  type: "string",
+                  description: "Script location"
+                },
+                timeoutMs: {
+                  type: "string",
+                  description: "Script timeout"
+                },
+                waitForCompletion: {
+                  type: "boolean",
+                  description: "Wait for script completion"
+                }
+              },
+              required: ["statements", "projectId"]
+            }
+          },
+          {
+            name: "bq_load_data",
+            description: "Load data from Cloud Storage into BigQuery",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sourceUri: { 
+                  type: "string",
+                  description: "Source file URI (gs://...)"
+                },
+                datasetId: {
+                  type: "string",
+                  description: "Target dataset ID"
+                },
+                tableId: {
+                  type: "string",
+                  description: "Target table ID"
+                },
+                format: {
+                  type: "string",
+                  enum: ["CSV", "JSON", "AVRO", "PARQUET", "ORC"],
+                  description: "Source file format"
+                },
+                writeDisposition: {
+                  type: "string",
+                  enum: ["WRITE_TRUNCATE", "WRITE_APPEND", "WRITE_EMPTY"],
+                  description: "How to write data"
+                },
+                createDisposition: {
+                  type: "string",
+                  enum: ["CREATE_IF_NEEDED", "CREATE_NEVER"],
+                  description: "Table creation behavior"
+                },
+                autodetect: {
+                  type: "boolean",
+                  description: "Auto-detect schema"
+                },
+                schema: {
+                  type: "object",
+                  description: "Table schema if not auto-detecting"
+                },
+                skipLeadingRows: {
+                  type: "number",
+                  description: "Rows to skip (CSV)"
+                },
+                fieldDelimiter: {
+                  type: "string",
+                  description: "Field delimiter (CSV)"
+                },
+                allowQuotedNewlines: {
+                  type: "boolean",
+                  description: "Allow quoted newlines (CSV)"
+                },
+                allowJaggedRows: {
+                  type: "boolean",
+                  description: "Allow jagged rows (CSV)"
+                },
+                location: {
+                  type: "string",
+                  description: "Job location"
+                },
+                waitForCompletion: {
+                  type: "boolean",
+                  description: "Wait for load to complete"
+                }
+              },
+              required: ["sourceUri", "datasetId", "tableId"]
+            }
+          },
+          {
+            name: "bq_export_data",
+            description: "Export BigQuery data to Cloud Storage",
+            inputSchema: {
+              type: "object",
+              properties: {
+                datasetId: { 
+                  type: "string",
+                  description: "Source dataset ID"
+                },
+                tableId: {
+                  type: "string",
+                  description: "Source table ID"
+                },
+                destinationUri: {
+                  type: "string",
+                  description: "Destination URI (gs://...)"
+                },
+                format: {
+                  type: "string",
+                  enum: ["CSV", "JSON", "AVRO", "PARQUET"],
+                  description: "Export format"
+                },
+                compress: {
+                  type: "boolean",
+                  description: "Compress output with gzip"
+                },
+                fieldDelimiter: {
+                  type: "string",
+                  description: "Field delimiter (CSV)"
+                },
+                printHeader: {
+                  type: "boolean",
+                  description: "Include header row (CSV)"
+                },
+                location: {
+                  type: "string",
+                  description: "Job location"
+                },
+                waitForCompletion: {
+                  type: "boolean",
+                  description: "Wait for export to complete"
+                }
+              },
+              required: ["datasetId", "tableId", "destinationUri"]
+            }
+          },
+          {
+            name: "bq_stream_insert",
+            description: "Stream insert rows into a BigQuery table",
+            inputSchema: {
+              type: "object",
+              properties: {
+                datasetId: { 
+                  type: "string",
+                  description: "Dataset ID"
+                },
+                tableId: {
+                  type: "string",
+                  description: "Table ID"
+                },
+                rows: {
+                  type: "array",
+                  description: "Array of row objects to insert",
+                  items: { type: "object" }
+                },
+                insertIds: {
+                  type: "array",
+                  description: "Optional insert IDs for deduplication",
+                  items: { type: "string" }
+                },
+                skipInvalidRows: {
+                  type: "boolean",
+                  description: "Skip invalid rows"
+                },
+                ignoreUnknownValues: {
+                  type: "boolean",
+                  description: "Ignore unknown field values"
+                }
+              },
+              required: ["datasetId", "tableId", "rows"]
+            }
+          },
+          {
+            name: "bq_get_table_schema",
+            description: "Get detailed schema and metadata for a table",
+            inputSchema: {
+              type: "object",
+              properties: {
+                datasetId: { 
+                  type: "string",
+                  description: "Dataset ID"
+                },
+                tableId: {
+                  type: "string",
+                  description: "Table ID"
+                },
+                projectId: {
+                  type: "string",
+                  description: "GCP Project ID (optional)"
+                }
+              },
+              required: ["datasetId", "tableId"]
+            }
+          },
+          {
+            name: "bq_get_routine_definition",
+            description: "Get stored procedure or function definition",
+            inputSchema: {
+              type: "object",
+              properties: {
+                datasetId: { 
+                  type: "string",
+                  description: "Dataset ID"
+                },
+                routineId: {
+                  type: "string",
+                  description: "Routine (procedure/function) ID"
+                },
+                projectId: {
+                  type: "string",
+                  description: "GCP Project ID (optional)"
+                }
+              },
+              required: ["datasetId", "routineId"]
+            }
+          },
+          {
+            name: "bq_copy_table",
+            description: "Copy a BigQuery table",
+            inputSchema: {
+              type: "object",
+              properties: {
+                sourceDatasetId: { 
+                  type: "string",
+                  description: "Source dataset ID"
+                },
+                sourceTableId: {
+                  type: "string",
+                  description: "Source table ID"
+                },
+                destinationDatasetId: {
+                  type: "string",
+                  description: "Destination dataset ID"
+                },
+                destinationTableId: {
+                  type: "string",
+                  description: "Destination table ID"
+                },
+                writeDisposition: {
+                  type: "string",
+                  enum: ["WRITE_TRUNCATE", "WRITE_APPEND", "WRITE_EMPTY"],
+                  description: "How to write data"
+                },
+                createDisposition: {
+                  type: "string",
+                  enum: ["CREATE_IF_NEEDED", "CREATE_NEVER"],
+                  description: "Table creation behavior"
+                },
+                waitForCompletion: {
+                  type: "boolean",
+                  description: "Wait for copy to complete"
+                }
+              },
+              required: ["sourceDatasetId", "sourceTableId", "destinationDatasetId", "destinationTableId"]
+            }
+          },
+          {
+            name: "bq_list_jobs",
+            description: "List BigQuery jobs",
+            inputSchema: {
+              type: "object",
+              properties: {
+                projectId: { 
+                  type: "string",
+                  description: "GCP Project ID (optional)"
+                },
+                maxResults: {
+                  type: "number",
+                  description: "Maximum results to return"
+                },
+                allUsers: {
+                  type: "boolean",
+                  description: "List jobs from all users"
+                },
+                stateFilter: {
+                  type: "string",
+                  enum: ["pending", "running", "done"],
+                  description: "Filter by job state"
+                },
+                minCreationTime: {
+                  type: "string",
+                  description: "Min creation time (ISO format)"
+                },
+                projection: {
+                  type: "string",
+                  enum: ["full", "minimal"],
+                  description: "Response detail level"
+                }
+              }
+            }
+          },
+          
+          // Legacy BigQuery Tools (for compatibility)
           {
             name: "bq_list_datasets",
             description: "List all BigQuery datasets in a project",
@@ -565,7 +1058,7 @@ app.post("/mcp", async (req, res) => {
           },
           {
             name: "bq_query",
-            description: "Execute a BigQuery SQL query",
+            description: "Execute a BigQuery SQL query (legacy - use bq_create_query_job for advanced features)",
             inputSchema: {
               type: "object",
               properties: {
@@ -797,15 +1290,22 @@ app.post("/mcp", async (req, res) => {
       const toolName = params?.name;
       const args = params?.arguments;
       
-      // List of GCP tools
-      const gcpTools = [
+      // List of all tools
+      const allTools = [
+        // Enhanced BQ tools
+        "bq_create_query_job", "bq_get_job", "bq_cancel_job", "bq_create_session",
+        "bq_query_with_session", "bq_execute_procedure", "bq_execute_script",
+        "bq_load_data", "bq_export_data", "bq_stream_insert", "bq_get_table_schema",
+        "bq_get_routine_definition", "bq_copy_table", "bq_list_jobs",
+        // Legacy BQ tools
         "bq_list_datasets", "bq_query", "bq_create_dataset", "bq_list_tables",
+        // Other GCP tools
         "gcs_list_buckets", "gcs_list_files", "gcs_read_file",
         "compute_list_instances", "compute_instance_action",
         "run_list_services", "list_projects", "gcloud_command"
       ];
       
-      if (gcpTools.includes(toolName)) {
+      if (allTools.includes(toolName)) {
         response.result = await handleGCPTool(toolName, args);
       } else if (toolName === "echo") {
         response.result = {
@@ -848,5 +1348,6 @@ app.all("*", (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`✅ GCP MCP server on port ${PORT}`);
+  console.log("Enhanced BigQuery capabilities: Jobs API, Sessions, Stored Procedures, Data Loading, and more!");
   console.log("Available tools: BigQuery, Cloud Storage, Compute Engine, Cloud Run, and more!");
 });
