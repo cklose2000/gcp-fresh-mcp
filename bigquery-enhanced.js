@@ -22,7 +22,7 @@ function formatParameter(param) {
     case 'BOOL':
       return param.value;
     case 'BYTES':
-      return `B'${param.value}'`;
+      return `B"${param.value}"`;
     case 'ARRAY':
       return `[${param.value.map(v => formatParameter({value: v, type: param.elementType})).join(', ')}]`;
     case 'STRUCT':
@@ -34,6 +34,166 @@ function formatParameter(param) {
       }
       return param.value;
   }
+}
+
+// Helper to build CREATE TABLE DDL
+function buildCreateTableDDL(args) {
+  let ddl = `CREATE TABLE`;
+  
+  if (args.orReplace) {
+    ddl = `CREATE OR REPLACE TABLE`;
+  } else if (args.ifNotExists) {
+    ddl = `CREATE TABLE IF NOT EXISTS`;
+  }
+  
+  ddl += ` \`${args.projectId || bigquery.projectId}.${args.datasetId}.${args.tableId}\``;
+  
+  // Add column definitions
+  if (args.schema && args.schema.length > 0) {
+    const columns = args.schema.map(field => {
+      let columnDef = `${field.name} ${field.type}`;
+      if (field.mode === 'REQUIRED') {
+        columnDef += ' NOT NULL';
+      }
+      if (field.description) {
+        columnDef += ` OPTIONS(description="${field.description}")`;
+      }
+      return columnDef;
+    });
+    ddl += ` (${columns.join(', ')})`;
+  }
+  
+  // Add partitioning
+  if (args.partitioning) {
+    if (args.partitioning.type === 'TIME') {
+      ddl += ` PARTITION BY ${args.partitioning.field}`;
+      if (args.partitioning.granularity && args.partitioning.granularity !== 'DAY') {
+        ddl += `(${args.partitioning.granularity})`;
+      }
+    } else if (args.partitioning.type === 'RANGE') {
+      ddl += ` PARTITION BY RANGE_BUCKET(${args.partitioning.field}, GENERATE_ARRAY(${args.partitioning.range.start}, ${args.partitioning.range.end}, ${args.partitioning.range.interval}))`;
+    }
+  }
+  
+  // Add clustering
+  if (args.clustering && args.clustering.length > 0) {
+    ddl += ` CLUSTER BY ${args.clustering.join(', ')}`;
+  }
+  
+  // Add table options
+  const options = [];
+  if (args.description) {
+    options.push(`description="${args.description}"`);
+  }
+  if (args.labels && Object.keys(args.labels).length > 0) {
+    const labelPairs = Object.entries(args.labels).map(([k, v]) => `"${k}"="${v}"`);
+    options.push(`labels=[${labelPairs.join(', ')}]`);
+  }
+  if (args.expirationTime) {
+    options.push(`expiration_timestamp=TIMESTAMP("${args.expirationTime}")`);
+  }
+  
+  if (options.length > 0) {
+    ddl += ` OPTIONS(${options.join(', ')})`;
+  }
+  
+  // Add AS SELECT clause if provided
+  if (args.query) {
+    ddl += ` AS (${args.query})`;
+  }
+  
+  return ddl;
+}
+
+// Helper to build ALTER TABLE DDL
+function buildAlterTableDDL(args) {
+  const tableRef = `\`${args.projectId || bigquery.projectId}.${args.datasetId}.${args.tableId}\``;
+  let ddl = `ALTER TABLE ${tableRef}`;
+  
+  switch (args.operation.toUpperCase()) {
+    case 'ADD_COLUMN':
+      ddl += ` ADD COLUMN ${args.columnName} ${args.columnType}`;
+      if (args.columnMode === 'REQUIRED') {
+        ddl += ' NOT NULL';
+      }
+      if (args.columnDescription) {
+        ddl += ` OPTIONS(description="${args.columnDescription}")`;
+      }
+      break;
+      
+    case 'DROP_COLUMN':
+      ddl += ` DROP COLUMN ${args.columnName}`;
+      break;
+      
+    case 'RENAME_COLUMN':
+      ddl += ` RENAME COLUMN ${args.oldColumnName} TO ${args.newColumnName}`;
+      break;
+      
+    case 'ALTER_COLUMN_TYPE':
+      ddl += ` ALTER COLUMN ${args.columnName} SET DATA TYPE ${args.newType}`;
+      break;
+      
+    case 'ALTER_COLUMN_OPTIONS':
+      const options = [];
+      if (args.description !== undefined) {
+        options.push(`description="${args.description}"`);
+      }
+      if (options.length > 0) {
+        ddl += ` ALTER COLUMN ${args.columnName} SET OPTIONS(${options.join(', ')})`;
+      }
+      break;
+      
+    case 'SET_OPTIONS':
+      const tableOptions = [];
+      if (args.description !== undefined) {
+        tableOptions.push(`description="${args.description}"`);
+      }
+      if (args.labels) {
+        const labelPairs = Object.entries(args.labels).map(([k, v]) => `"${k}"="${v}"`);
+        tableOptions.push(`labels=[${labelPairs.join(', ')}]`);
+      }
+      if (args.expirationTime) {
+        tableOptions.push(`expiration_timestamp=TIMESTAMP("${args.expirationTime}")`);
+      }
+      if (tableOptions.length > 0) {
+        ddl += ` SET OPTIONS(${tableOptions.join(', ')})`;
+      }
+      break;
+      
+    default:
+      throw new Error(`Unsupported ALTER TABLE operation: ${args.operation}`);
+  }
+  
+  return ddl;
+}
+
+// Helper to build CREATE VIEW DDL
+function buildCreateViewDDL(args) {
+  let ddl = `CREATE VIEW`;
+  
+  if (args.orReplace) {
+    ddl = `CREATE OR REPLACE VIEW`;
+  }
+  
+  ddl += ` \`${args.projectId || bigquery.projectId}.${args.datasetId}.${args.viewId}\``;
+  
+  // Add view options
+  const options = [];
+  if (args.description) {
+    options.push(`description="${args.description}"`);
+  }
+  if (args.labels && Object.keys(args.labels).length > 0) {
+    const labelPairs = Object.entries(args.labels).map(([k, v]) => `"${k}"="${v}"`);
+    options.push(`labels=[${labelPairs.join(', ')}]`);
+  }
+  
+  if (options.length > 0) {
+    ddl += ` OPTIONS(${options.join(', ')})`;
+  }
+  
+  ddl += ` AS ${args.query}`;
+  
+  return ddl;
 }
 
 // Jobs API - Async query execution
@@ -82,6 +242,203 @@ export async function bq_create_query_job(args) {
     };
   } catch (error) {
     throw new Error(`Failed to create query job: ${error.message}`);
+  }
+}
+
+// Create table with comprehensive DDL support
+export async function bq_create_table(args) {
+  try {
+    const ddl = buildCreateTableDDL(args);
+    
+    const options = {
+      query: ddl,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. CREATE TABLE DDL validated:\n${ddl}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      
+      return {
+        content: [{
+          type: "text",
+          text: `Table ${args.datasetId}.${args.tableId} created successfully.\nDDL executed: ${ddl}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `CREATE TABLE job created.\nJob ID: ${job.id}\nDDL: ${ddl}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to create table: ${error.message}`);
+  }
+}
+
+// Alter table structure and properties
+export async function bq_alter_table(args) {
+  try {
+    const ddl = buildAlterTableDDL(args);
+    
+    const options = {
+      query: ddl,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. ALTER TABLE DDL validated:\n${ddl}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      
+      return {
+        content: [{
+          type: "text",
+          text: `Table ${args.datasetId}.${args.tableId} altered successfully.\nOperation: ${args.operation}\nDDL executed: ${ddl}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `ALTER TABLE job created.\nJob ID: ${job.id}\nDDL: ${ddl}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to alter table: ${error.message}`);
+  }
+}
+
+// Drop table with safety confirmation
+export async function bq_drop_table(args) {
+  try {
+    const tableRef = `\`${args.projectId || bigquery.projectId}.${args.datasetId}.${args.tableId}\``;
+    let ddl = `DROP TABLE`;
+    
+    if (args.ifExists) {
+      ddl += ` IF EXISTS`;
+    }
+    
+    ddl += ` ${tableRef}`;
+    
+    // Safety check - require explicit confirmation for destructive operations
+    if (!args.confirmed && !args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `⚠️ WARNING: This will permanently delete table ${args.datasetId}.${args.tableId}\nTo proceed, add "confirmed": true to your request.\nTo preview the operation, add "dryRun": true.`
+        }]
+      };
+    }
+    
+    const options = {
+      query: ddl,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. DROP TABLE DDL validated:\n${ddl}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      
+      return {
+        content: [{
+          type: "text",
+          text: `Table ${args.datasetId}.${args.tableId} dropped successfully.\nDDL executed: ${ddl}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `DROP TABLE job created.\nJob ID: ${job.id}\nDDL: ${ddl}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to drop table: ${error.message}`);
+  }
+}
+
+// Create view with comprehensive options
+export async function bq_create_view(args) {
+  try {
+    const ddl = buildCreateViewDDL(args);
+    
+    const options = {
+      query: ddl,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. CREATE VIEW DDL validated:\n${ddl}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      
+      return {
+        content: [{
+          type: "text",
+          text: `View ${args.datasetId}.${args.viewId} created successfully.\nDDL executed: ${ddl}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `CREATE VIEW job created.\nJob ID: ${job.id}\nDDL: ${ddl}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to create view: ${error.message}`);
   }
 }
 
