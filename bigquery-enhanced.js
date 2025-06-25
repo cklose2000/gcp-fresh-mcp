@@ -36,6 +36,33 @@ function formatParameter(param) {
   }
 }
 
+// Helper to format values for DML operations
+function formatValue(value, type) {
+  if (value === null || value === undefined) {
+    return 'NULL';
+  }
+  
+  if (type) {
+    return formatParameter({ value, type });
+  }
+  
+  // Auto-infer type
+  if (typeof value === 'string') {
+    return `'${value.replace(/'/g, "''")}'`;
+  } else if (typeof value === 'number') {
+    return value;
+  } else if (typeof value === 'boolean') {
+    return value;
+  } else if (Array.isArray(value)) {
+    return `[${value.map(v => formatValue(v)).join(', ')}]`;
+  } else if (typeof value === 'object') {
+    const pairs = Object.entries(value).map(([k, v]) => `${formatValue(v)} AS ${k}`);
+    return `STRUCT(${pairs.join(', ')})`;
+  }
+  
+  return value;
+}
+
 // Helper to build CREATE TABLE DDL
 function buildCreateTableDDL(args) {
   let ddl = `CREATE TABLE`;
@@ -194,6 +221,119 @@ function buildCreateViewDDL(args) {
   ddl += ` AS ${args.query}`;
   
   return ddl;
+}
+
+// Helper to build INSERT DML
+function buildInsertDML(args) {
+  const tableRef = `\`${args.projectId || bigquery.projectId}.${args.datasetId}.${args.tableId}\``;
+  let dml = `INSERT INTO ${tableRef}`;
+  
+  if (args.columns && args.columns.length > 0) {
+    dml += ` (${args.columns.join(', ')})`;
+  }
+  
+  if (args.query) {
+    // INSERT ... SELECT
+    dml += ` ${args.query}`;
+  } else if (args.values && args.values.length > 0) {
+    // INSERT ... VALUES
+    const valueRows = args.values.map(row => {
+      if (Array.isArray(row)) {
+        return `(${row.map(val => formatValue(val)).join(', ')})`;
+      } else if (typeof row === 'object') {
+        // Handle object with column mappings
+        const orderedValues = args.columns 
+          ? args.columns.map(col => formatValue(row[col]))
+          : Object.values(row).map(val => formatValue(val));
+        return `(${orderedValues.join(', ')})`;
+      }
+      return `(${formatValue(row)})`;
+    });
+    dml += ` VALUES ${valueRows.join(', ')}`;
+  }
+  
+  return dml;
+}
+
+// Helper to build UPDATE DML
+function buildUpdateDML(args) {
+  const tableRef = `\`${args.projectId || bigquery.projectId}.${args.datasetId}.${args.tableId}\``;
+  let dml = `UPDATE ${tableRef}`;
+  
+  // Build SET clause
+  const setClauses = [];
+  if (args.set) {
+    for (const [column, value] of Object.entries(args.set)) {
+      setClauses.push(`${column} = ${formatValue(value)}`);
+    }
+  }
+  
+  if (setClauses.length === 0) {
+    throw new Error('UPDATE statement requires at least one SET clause');
+  }
+  
+  dml += ` SET ${setClauses.join(', ')}`;
+  
+  // Add WHERE clause
+  if (args.where) {
+    dml += ` WHERE ${args.where}`;
+  }
+  
+  return dml;
+}
+
+// Helper to build DELETE DML
+function buildDeleteDML(args) {
+  const tableRef = `\`${args.projectId || bigquery.projectId}.${args.datasetId}.${args.tableId}\``;
+  let dml = `DELETE FROM ${tableRef}`;
+  
+  // WHERE clause is required for safety
+  if (!args.where && !args.confirmed) {
+    throw new Error('DELETE requires WHERE clause or explicit confirmation. Add "confirmed": true to delete all rows.');
+  }
+  
+  if (args.where) {
+    dml += ` WHERE ${args.where}`;
+  }
+  
+  return dml;
+}
+
+// Helper to build MERGE DML
+function buildMergeDML(args) {
+  const targetRef = `\`${args.projectId || bigquery.projectId}.${args.targetDatasetId}.${args.targetTableId}\``;
+  let dml = `MERGE ${targetRef} AS target`;
+  
+  // Add USING clause
+  if (args.sourceQuery) {
+    dml += ` USING (${args.sourceQuery}) AS source`;
+  } else if (args.sourceDatasetId && args.sourceTableId) {
+    const sourceRef = `\`${args.projectId || bigquery.projectId}.${args.sourceDatasetId}.${args.sourceTableId}\``;
+    dml += ` USING ${sourceRef} AS source`;
+  } else {
+    throw new Error('MERGE requires either sourceQuery or sourceDatasetId/sourceTableId');
+  }
+  
+  // Add ON clause
+  if (!args.on) {
+    throw new Error('MERGE requires ON clause for matching condition');
+  }
+  dml += ` ON ${args.on}`;
+  
+  // Add WHEN clauses
+  if (args.whenMatched) {
+    dml += ` WHEN MATCHED THEN ${args.whenMatched}`;
+  }
+  
+  if (args.whenNotMatched) {
+    dml += ` WHEN NOT MATCHED THEN ${args.whenNotMatched}`;
+  }
+  
+  if (args.whenNotMatchedBySource) {
+    dml += ` WHEN NOT MATCHED BY SOURCE THEN ${args.whenNotMatchedBySource}`;
+  }
+  
+  return dml;
 }
 
 // Jobs API - Async query execution
@@ -439,6 +579,223 @@ export async function bq_create_view(args) {
     };
   } catch (error) {
     throw new Error(`Failed to create view: ${error.message}`);
+  }
+}
+
+// Insert data using DML
+export async function bq_insert_data(args) {
+  try {
+    const dml = buildInsertDML(args);
+    
+    const options = {
+      query: dml,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    if (args.sessionId) {
+      options.connectionProperties = {
+        session_id: args.sessionId
+      };
+    }
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. INSERT DML validated:\n${dml}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      const [metadata] = await job.getMetadata();
+      const rowsAffected = metadata.statistics.query?.dmlStats?.insertedRowCount || 'unknown';
+      
+      return {
+        content: [{
+          type: "text",
+          text: `Data inserted successfully into ${args.datasetId}.${args.tableId}.\nRows inserted: ${rowsAffected}\nDML executed: ${dml}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `INSERT job created.\nJob ID: ${job.id}\nDML: ${dml}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to insert data: ${error.message}`);
+  }
+}
+
+// Update data using DML
+export async function bq_update_data(args) {
+  try {
+    const dml = buildUpdateDML(args);
+    
+    const options = {
+      query: dml,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    if (args.sessionId) {
+      options.connectionProperties = {
+        session_id: args.sessionId
+      };
+    }
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. UPDATE DML validated:\n${dml}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      const [metadata] = await job.getMetadata();
+      const rowsAffected = metadata.statistics.query?.dmlStats?.updatedRowCount || 'unknown';
+      
+      return {
+        content: [{
+          type: "text",
+          text: `Data updated successfully in ${args.datasetId}.${args.tableId}.\nRows updated: ${rowsAffected}\nDML executed: ${dml}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `UPDATE job created.\nJob ID: ${job.id}\nDML: ${dml}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to update data: ${error.message}`);
+  }
+}
+
+// Delete data using DML
+export async function bq_delete_data(args) {
+  try {
+    const dml = buildDeleteDML(args);
+    
+    const options = {
+      query: dml,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    if (args.sessionId) {
+      options.connectionProperties = {
+        session_id: args.sessionId
+      };
+    }
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. DELETE DML validated:\n${dml}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      const [metadata] = await job.getMetadata();
+      const rowsAffected = metadata.statistics.query?.dmlStats?.deletedRowCount || 'unknown';
+      
+      return {
+        content: [{
+          type: "text",
+          text: `Data deleted successfully from ${args.datasetId}.${args.tableId}.\nRows deleted: ${rowsAffected}\nDML executed: ${dml}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `DELETE job created.\nJob ID: ${job.id}\nDML: ${dml}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to delete data: ${error.message}`);
+  }
+}
+
+// Merge data using MERGE statement
+export async function bq_merge_data(args) {
+  try {
+    const dml = buildMergeDML(args);
+    
+    const options = {
+      query: dml,
+      location: args.location || 'US',
+      useLegacySql: false,
+      dryRun: args.dryRun || false
+    };
+    
+    if (args.sessionId) {
+      options.connectionProperties = {
+        session_id: args.sessionId
+      };
+    }
+    
+    const [job] = await bigquery.createQueryJob(options);
+    
+    if (args.dryRun) {
+      return {
+        content: [{
+          type: "text",
+          text: `Dry run successful. MERGE DML validated:\n${dml}`
+        }]
+      };
+    }
+    
+    if (args.waitForCompletion !== false) {
+      await job.promise();
+      const [metadata] = await job.getMetadata();
+      const stats = metadata.statistics.query?.dmlStats;
+      const summary = [];
+      
+      if (stats?.insertedRowCount) summary.push(`${stats.insertedRowCount} rows inserted`);
+      if (stats?.updatedRowCount) summary.push(`${stats.updatedRowCount} rows updated`);
+      if (stats?.deletedRowCount) summary.push(`${stats.deletedRowCount} rows deleted`);
+      
+      return {
+        content: [{
+          type: "text",
+          text: `MERGE operation completed successfully.\n${summary.length > 0 ? summary.join(', ') : 'No rows affected'}\nTarget table: ${args.targetDatasetId}.${args.targetTableId}\nDML executed: ${dml}\nJob ID: ${job.id}`
+        }]
+      };
+    }
+    
+    return {
+      content: [{
+        type: "text",
+        text: `MERGE job created.\nJob ID: ${job.id}\nDML: ${dml}`
+      }]
+    };
+  } catch (error) {
+    throw new Error(`Failed to merge data: ${error.message}`);
   }
 }
 
