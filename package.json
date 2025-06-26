@@ -25,7 +25,7 @@
     "@google-cloud/storage": "^7.7.0",
     "@google-cloud/compute": "^4.1.0",
     "@google-cloud/run": "^1.2.0",
-    "@google-cloud/resource-manager": "^5.1.0"
+    "@google-cloud/resource-manager": "^6.1.0"
   },
   "engines": {
     "node": ">=18.0.0"
