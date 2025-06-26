@@ -10,6 +10,7 @@ This MCP server now provides comprehensive control over your Google Cloud Platfo
 
 - **Secret Token Authentication**: Protects MCP endpoints with secure token authentication
 - **OAuth Flow Support**: Implements a complete OAuth flow to satisfy Claude Code's authentication requirements
+- **OAuth Authorization Server Discovery**: Supports RFC 8414 OAuth 2.0 Authorization Server Metadata discovery
 - **Dual-Layer Security**: OAuth for initial handshake + secret token for actual tool calls
 - **Access Monitoring**: Logs unauthorized access attempts
 - **Command Filtering**: Dangerous gcloud commands are blocked
@@ -17,11 +18,35 @@ This MCP server now provides comprehensive control over your Google Cloud Platfo
 ## Features
 
 - **OAuth Flow Support**: Implements a complete OAuth flow to satisfy Claude Code's authentication requirements
+- **OAuth Authorization Server Discovery**: Automatic discovery of OAuth endpoints via `/.well-known/oauth-authorization-server` (RFC 8414)
 - **JSON-RPC 2.0 Compliant**: Properly formatted responses for MCP protocol compatibility
 - **Cloud Run Ready**: Designed for easy deployment on Google Cloud Platform
 - **Comprehensive GCP Control**: Tools for BigQuery, Cloud Storage, Compute Engine, Cloud Run, and more
 - **Enhanced BigQuery Features**: Jobs API, Sessions, Stored Procedures, Data Loading/Export, Streaming
 - **Secure by Default**: Built-in safety checks and permission controls
+
+## OAuth Authorization Server Discovery
+
+This server implements OAuth 2.0 Authorization Server Metadata discovery as specified in RFC 8414, which is now supported by Claude Code. This allows Claude Code to automatically discover OAuth endpoints without manual configuration.
+
+### How It Works
+
+1. Claude Code requests `/.well-known/oauth-authorization-server` from your server
+2. The server returns metadata including:
+   - `issuer`: Your authorization server URL
+   - `authorization_endpoint`: Where to send authorization requests
+   - `token_endpoint`: Where to exchange codes for tokens
+   - `response_types_supported`: OAuth response types (e.g., "code")
+   - `code_challenge_methods_supported`: PKCE methods (e.g., "S256")
+
+### Benefits
+
+- **Automatic Configuration**: No need to manually specify OAuth endpoints
+- **Standards Compliant**: Follows RFC 8414 specification
+- **Future-Proof**: Endpoints can be changed without updating client configuration
+- **Better Security**: Supports PKCE and other modern OAuth features
+
+For implementation details, see the [MCP OAuth specification](https://modelcontextprotocol.io/docs/concepts/authentication#oauth-20).
 
 ## Available GCP Tools
 
