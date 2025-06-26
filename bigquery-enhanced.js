@@ -336,6 +336,250 @@ function buildMergeDML(args) {
   return dml;
 }
 
+// Execute multiple SQL statements with individual results - addresses issue #1
+export async function bq_execute_multi_statement(args) {
+  // Input validation
+  if (!args.statements || !Array.isArray(args.statements) || args.statements.length === 0) {
+    throw new Error('statements parameter is required and must be a non-empty array');
+  }
+  
+  // Filter out empty statements
+  const validStatements = args.statements
+    .map((stmt, index) => ({ sql: stmt?.trim(), originalIndex: index }))
+    .filter(({ sql }) => sql && sql.length > 0);
+  
+  if (validStatements.length === 0) {
+    throw new Error('No valid SQL statements found');
+  }
+  
+  const startTime = Date.now();
+  let currentSessionId = args.sessionId;
+  
+  // Initialize response structure
+  const response = {
+    summary: {
+      totalStatements: validStatements.length,
+      executed: 0,
+      succeeded: 0,
+      failed: 0,
+      skipped: 0,
+      startTime: new Date(startTime).toISOString(),
+      endTime: null,
+      totalDurationMs: 0
+    },
+    statements: [],
+    sessionId: currentSessionId
+  };
+  
+  // Execute each statement individually
+  for (let i = 0; i < validStatements.length; i++) {
+    const { sql, originalIndex } = validStatements[i];
+    const statementStartTime = Date.now();
+    
+    const statementResult = {
+      index: originalIndex,
+      sql: sql.length > 150 ? sql.substring(0, 150) + '...' : sql,
+      status: 'pending',
+      jobId: null,
+      error: null,
+      results: {
+        rows: [],
+        totalRows: 0,
+        schema: null
+      },
+      metadata: {
+        startTime: new Date(statementStartTime).toISOString(),
+        endTime: null,
+        durationMs: 0,
+        bytesProcessed: 0,
+        rowsAffected: 0,
+        cacheHit: false
+      }
+    };
+    
+    try {
+      // Configure job options
+      const options = {
+        query: sql,
+        location: args.location || 'US',
+        useLegacySql: false,
+        dryRun: args.dryRun || false,
+        jobTimeoutMs: args.timeoutMs || '600000'
+      };
+      
+      // Handle session management
+      if (currentSessionId) {
+        options.connectionProperties = {
+          session_id: currentSessionId
+        };
+      } else if (i === 0) {
+        // Create session on first statement if not provided
+        options.createSession = true;
+      }
+      
+      // Execute the statement
+      const [job] = await bigquery.createQueryJob(options);
+      statementResult.jobId = job.id;
+      response.summary.executed++;
+      
+      if (args.dryRun) {
+        // Dry run mode - just validate
+        const jobMetadata = job.metadata;
+        statementResult.status = 'validated';
+        statementResult.metadata.bytesProcessed = parseInt(jobMetadata.statistics?.query?.totalBytesProcessed || 0);
+        statementResult.metadata.endTime = new Date().toISOString();
+        statementResult.metadata.durationMs = Date.now() - statementStartTime;
+        response.summary.succeeded++;
+      } else if (args.waitForCompletion !== false) {
+        // Wait for completion and get results
+        await job.promise();
+        const [jobMetadata] = await job.getMetadata();
+        
+        // Extract session ID from first statement if created
+        if (i === 0 && !currentSessionId && jobMetadata.statistics?.sessionInfo?.sessionId) {
+          currentSessionId = jobMetadata.statistics.sessionInfo.sessionId;
+          response.sessionId = currentSessionId;
+        }
+        
+        // Get query results if available
+        let rows = [];
+        if (jobMetadata.configuration.query) {
+          try {
+            const [queryRows] = await job.getQueryResults({ maxResults: args.maxResults || 1000 });
+            rows = queryRows;
+          } catch (resultsError) {
+            // Some DDL statements don't return results - this is normal
+            rows = [];
+          }
+        }
+        
+        // Build statement result
+        statementResult.status = 'completed';
+        statementResult.results.rows = rows.slice(0, 100); // Limit for response size
+        statementResult.results.totalRows = parseInt(jobMetadata.statistics?.query?.totalRows || rows.length);
+        statementResult.results.schema = jobMetadata.statistics?.query?.schema?.fields || null;
+        
+        // Extract metadata
+        const stats = jobMetadata.statistics.query;
+        statementResult.metadata.endTime = new Date().toISOString();
+        statementResult.metadata.durationMs = Date.now() - statementStartTime;
+        statementResult.metadata.bytesProcessed = parseInt(stats?.totalBytesProcessed || 0);
+        statementResult.metadata.cacheHit = stats?.cacheHit || false;
+        
+        // Extract DML stats if available
+        if (stats?.dmlStats) {
+          const dmlStats = stats.dmlStats;
+          statementResult.metadata.rowsAffected = parseInt(
+            dmlStats.insertedRowCount || 
+            dmlStats.updatedRowCount || 
+            dmlStats.deletedRowCount || 0
+          );
+        }
+        
+        response.summary.succeeded++;
+      } else {
+        // Async mode - job created but not waiting
+        statementResult.status = 'submitted';
+        statementResult.metadata.endTime = new Date().toISOString();
+        statementResult.metadata.durationMs = Date.now() - statementStartTime;
+        response.summary.succeeded++;
+      }
+      
+    } catch (error) {
+      // Handle statement error
+      statementResult.status = 'failed';
+      statementResult.error = {
+        message: error.message,
+        code: error.code || 'UNKNOWN_ERROR',
+        details: error.errors || []
+      };
+      statementResult.metadata.endTime = new Date().toISOString();
+      statementResult.metadata.durationMs = Date.now() - statementStartTime;
+      response.summary.failed++;
+      
+      // Check if we should stop on error
+      if (args.stopOnError) {
+        // Mark remaining statements as skipped
+        response.summary.skipped = validStatements.length - i - 1;
+        response.statements.push(statementResult);
+        break;
+      }
+    }
+    
+    response.statements.push(statementResult);
+  }
+  
+  // Finalize response
+  const endTime = Date.now();
+  response.summary.endTime = new Date(endTime).toISOString();
+  response.summary.totalDurationMs = endTime - startTime;
+  
+  // Format output based on execution mode
+  if (args.dryRun) {
+    const totalBytes = response.statements.reduce((sum, stmt) => sum + (stmt.metadata.bytesProcessed || 0), 0);
+    const formattedBytes = totalBytes > 1024 * 1024 * 1024 
+      ? `${(totalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+      : totalBytes > 1024 * 1024
+      ? `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`
+      : `${totalBytes} bytes`;
+      
+    return {
+      content: [{
+        type: "text",
+        text: `✓ Dry run validation completed successfully.
+${response.summary.succeeded}/${response.summary.totalStatements} statements validated.
+Estimated bytes to process: ${formattedBytes}
+Total validation time: ${response.summary.totalDurationMs}ms
+
+${response.summary.failed > 0 ? `❌ Failed statements: ${response.summary.failed}` : ''}
+
+Use waitForCompletion: false for async execution or remove dryRun: true to execute.`
+      }]
+    };
+  }
+  
+  // Format execution results
+  const summaryText = `Multi-statement execution ${response.summary.failed === 0 ? 'completed successfully' : 'completed with errors'}.
+
+📊 Execution Summary:
+• Total statements: ${response.summary.totalStatements}
+• Succeeded: ${response.summary.succeeded}
+• Failed: ${response.summary.failed}
+• Skipped: ${response.summary.skipped}
+• Total duration: ${response.summary.totalDurationMs}ms
+${response.sessionId ? `• Session ID: ${response.sessionId}` : ''}
+
+📋 Statement Results:
+${response.statements.map(stmt => {
+  const statusIcon = stmt.status === 'completed' ? '✅' : stmt.status === 'failed' ? '❌' : stmt.status === 'submitted' ? '⏳' : '🔍';
+  const duration = stmt.metadata.durationMs ? ` (${stmt.metadata.durationMs}ms)` : '';
+  const rows = stmt.results.totalRows > 0 ? ` - ${stmt.results.totalRows} rows` : '';
+  const affected = stmt.metadata.rowsAffected > 0 ? ` - ${stmt.metadata.rowsAffected} affected` : '';
+  const bytes = stmt.metadata.bytesProcessed > 0 ? ` - ${Math.round(stmt.metadata.bytesProcessed / 1024)}KB` : '';
+  
+  let result = `${statusIcon} Statement ${stmt.index + 1}: ${stmt.sql}${duration}${rows}${affected}${bytes}`;
+  
+  if (stmt.error) {
+    result += `\n   Error: ${stmt.error.message}`;
+  }
+  
+  if (stmt.jobId && stmt.status !== 'failed') {
+    result += `\n   Job ID: ${stmt.jobId}`;
+  }
+  
+  return result;
+}).join('\n\n')}
+
+${args.waitForCompletion === false ? '\n💡 Jobs submitted asynchronously. Use bq_get_job to check individual statement status.' : ''}`;
+
+  return {
+    content: [{
+      type: "text",
+      text: summaryText
+    }]
+  };
+}
+
 // Jobs API - Async query execution
 export async function bq_create_query_job(args) {
   const projectId = args.projectId;
