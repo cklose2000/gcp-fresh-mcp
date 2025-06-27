@@ -28,6 +28,24 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// OAuth discovery endpoint - always accessible to allow proper 404 when disabled
+app.get("/.well-known/oauth-authorization-server", (req, res) => {
+  if (!USE_OAUTH) {
+    return res.status(404).json({ error: "OAuth not supported" });
+  }
+  const protocol = req.get('x-forwarded-proto') || 'https';
+  const base = `${protocol}://${req.get("host")}`;
+  res.json({
+    issuer: base,
+    authorization_endpoint: `${base}/authorize`,
+    token_endpoint: `${base}/token`,
+    registration_endpoint: `${base}/register`,
+    response_types_supported: ["code"],
+    grant_types_supported: ["authorization_code"],
+    code_challenge_methods_supported: ["S256"]
+  });
+});
+
 // Middleware to check secret on MCP endpoints
 app.use('/mcp', (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -71,20 +89,6 @@ const getProjectId = async (providedId) => {
 
 // OAuth endpoints - only serve if OAuth is enabled
 if (USE_OAUTH) {
-  app.get("/.well-known/oauth-authorization-server", (req, res) => {
-    const protocol = req.get('x-forwarded-proto') || 'https';
-    const base = `${protocol}://${req.get("host")}`;
-    res.json({
-      issuer: base,
-      authorization_endpoint: `${base}/authorize`,
-      token_endpoint: `${base}/token`,
-      registration_endpoint: `${base}/register`,
-      response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code"],
-      code_challenge_methods_supported: ["S256"]
-    });
-  });
-
   app.post("/register", (req, res) => {
     res.status(201).json({
       client_id: "mcp-client",
