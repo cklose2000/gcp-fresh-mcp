@@ -1,6 +1,80 @@
 // BigQuery MCP tool definitions
 export const allBigQueryTools = [
   {
+    name: "gcp-sql",
+    description: "Universal SQL interface for BigQuery operations using INFORMATION_SCHEMA - replaces multiple tools with a single efficient interface",
+    inputSchema: {
+      type: "object",
+      properties: {
+        operation: {
+          type: "string",
+          enum: [
+            "list-datasets",
+            "list-tables", 
+            "describe-table",
+            "table-schema",
+            "dataset-info",
+            "list-views",
+            "list-routines",
+            "job-history",
+            "current-project"
+          ],
+          description: "Pre-defined operation using INFORMATION_SCHEMA queries"
+        },
+        query: {
+          type: "string",
+          description: "Direct SQL query to execute"
+        },
+        projectId: {
+          type: "string",
+          description: "GCP Project ID (optional, uses default if not provided)"
+        },
+        dataset: {
+          type: "string",
+          description: "Dataset ID (required for table/view operations)"
+        },
+        table: {
+          type: "string",
+          description: "Table name (required for table-specific operations)"
+        },
+        location: {
+          type: "string",
+          description: "Query location (e.g., US, EU)"
+        },
+        useLegacySql: {
+          type: "boolean",
+          description: "Use legacy SQL syntax (default: false)",
+          default: false
+        },
+        format: {
+          type: "string",
+          enum: ["json", "table", "csv"],
+          description: "Output format (default: json)",
+          default: "json"
+        },
+        maxRows: {
+          type: "number",
+          description: "Maximum rows to return (default: 100)",
+          default: 100
+        },
+        hours: {
+          type: "number",
+          description: "Hours of job history to retrieve (for job-history operation)",
+          default: 24
+        },
+        limit: {
+          type: "number",
+          description: "Limit for job history results (for job-history operation)",
+          default: 100
+        }
+      },
+      anyOf: [
+        { required: ["operation"] },
+        { required: ["query"] }
+      ]
+    }
+  },
+  {
     name: "bq-list-datasets",
     description: "List all BigQuery datasets in a project",
     inputSchema: {

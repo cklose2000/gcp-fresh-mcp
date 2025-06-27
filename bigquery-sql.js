@@ -257,7 +257,7 @@ function formatAsTable(rows, truncated, totalRows) {
   table += '| ' + headers.map((h, i) => h.padEnd(maxWidths[i])).join(' | ') + ' |\n';
   
   // Separator row
-  table += '|-' + maxWidths.map(w => '-'.repeat(w)).join('-|-') + '-|\n';
+  table += '|-' + maxWidths.map(w => '-'.repeat(w)).join('|-') + '|\n';
   
   // Data rows
   rows.forEach(row => {
