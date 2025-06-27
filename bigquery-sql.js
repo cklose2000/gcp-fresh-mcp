@@ -5,6 +5,56 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 const bigquery = new BigQuery();
 
+// Helper function to parse BigQuery timestamps
+function parseTimestamp(timestamp) {
+  if (!timestamp) return null;
+  
+  // Handle BigQuery timestamp objects with value property
+  if (timestamp && typeof timestamp === 'object' && 'value' in timestamp) {
+    return new Date(timestamp.value);
+  }
+  
+  // Handle string timestamps
+  if (typeof timestamp === 'string') {
+    return new Date(timestamp);
+  }
+  
+  // Handle numeric timestamps (milliseconds)
+  if (typeof timestamp === 'number') {
+    return new Date(timestamp);
+  }
+  
+  return timestamp;
+}
+
+// Helper function to format timestamps for display
+function formatTimestamp(timestamp) {
+  const date = parseTimestamp(timestamp);
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return timestamp; // Return original if parsing fails
+  }
+  
+  // Format as ISO string with timezone
+  return date.toISOString();
+}
+
+// Helper function to process row data and format timestamps
+function processRowData(row) {
+  const processed = {};
+  const timestampFields = ['creation_time', 'start_time', 'end_time', 'last_modified_time', 'creationTime', 'updateTime'];
+  
+  for (const [key, value] of Object.entries(row)) {
+    // Check if this field is a timestamp field
+    if (timestampFields.some(field => key.toLowerCase().includes(field.toLowerCase()))) {
+      processed[key] = formatTimestamp(value);
+    } else {
+      processed[key] = value;
+    }
+  }
+  
+  return processed;
+}
+
 // Debug logging
 const DEBUG = process.env.DEBUG_GCP_MCP === 'true';
 const log = (message, ...args) => {
@@ -77,8 +127,8 @@ const QUERY_TEMPLATES = {
       location,
       creation_time,
       last_modified_time
-    FROM \`{project}.INFORMATION_SCHEMA.SCHEMATA_OPTIONS\`
-    WHERE schema_name != 'INFORMATION_SCHEMA'
+    FROM \`region-us.INFORMATION_SCHEMA.SCHEMATA\`
+    WHERE catalog_name = '{project}' AND schema_name != 'INFORMATION_SCHEMA'
     ORDER BY schema_name
   `,
   
@@ -86,10 +136,7 @@ const QUERY_TEMPLATES = {
     SELECT 
       table_name,
       table_type,
-      creation_time,
-      ROW_COUNT as row_count,
-      SIZE_BYTES as size_bytes,
-      ROUND(SIZE_BYTES / 1024 / 1024, 2) as size_mb
+      creation_time
     FROM \`{project}.{dataset}.INFORMATION_SCHEMA.TABLES\`
     ORDER BY table_name
   `,
@@ -99,11 +146,7 @@ const QUERY_TEMPLATES = {
       column_name,
       data_type,
       is_nullable,
-      column_default,
-      is_generated,
-      generation_expression,
-      is_stored,
-      is_updatable
+      column_default
     FROM \`{project}.{dataset}.INFORMATION_SCHEMA.COLUMNS\`
     WHERE table_name = '{table}'
     ORDER BY ordinal_position
@@ -112,7 +155,8 @@ const QUERY_TEMPLATES = {
   'table-schema': `
     SELECT 
       table_name,
-      ddl
+      table_type,
+      creation_time
     FROM \`{project}.{dataset}.INFORMATION_SCHEMA.TABLES\`
     WHERE table_name = '{table}'
   `,
@@ -120,24 +164,16 @@ const QUERY_TEMPLATES = {
   'dataset-info': `
     SELECT 
       schema_name as dataset_id,
-      location,
-      creation_time,
       option_name,
       option_value
-    FROM \`{project}.INFORMATION_SCHEMA.SCHEMATA_OPTIONS\`
+    FROM \`{project}.region-us.INFORMATION_SCHEMA.SCHEMATA_OPTIONS\`
     WHERE schema_name = '{dataset}'
   `,
   
   'list-views': `
     SELECT 
       table_name as view_name,
-      view_definition,
-      check_option,
-      is_updatable,
-      is_insertable_into,
-      is_trigger_updatable,
-      is_trigger_deletable,
-      is_trigger_insertable_into
+      view_definition
     FROM \`{project}.{dataset}.INFORMATION_SCHEMA.VIEWS\`
     ORDER BY table_name
   `,
@@ -148,7 +184,6 @@ const QUERY_TEMPLATES = {
       routine_type,
       language,
       creation_time,
-      last_altered_time,
       routine_definition
     FROM \`{project}.{dataset}.INFORMATION_SCHEMA.ROUTINES\`
     ORDER BY routine_name
@@ -167,7 +202,7 @@ const QUERY_TEMPLATES = {
       total_bytes_processed,
       total_slot_ms,
       ROUND(total_bytes_processed / 1024 / 1024 / 1024, 2) as gb_processed
-    FROM \`{project}.INFORMATION_SCHEMA.JOBS_BY_PROJECT\`
+    FROM \`{project}.region-us.INFORMATION_SCHEMA.JOBS_BY_PROJECT\`
     WHERE creation_time >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {hours} HOUR)
     ORDER BY creation_time DESC
     LIMIT {limit}
@@ -191,7 +226,9 @@ function formatResults(rows, format = 'json', maxRows = 100) {
     };
   }
 
-  const displayRows = rows.slice(0, maxRows);
+  // Process rows to format timestamps
+  const processedRows = rows.map(row => processRowData(row));
+  const displayRows = processedRows.slice(0, maxRows);
   const truncated = rows.length > maxRows;
 
   switch (format.toLowerCase()) {
@@ -370,14 +407,6 @@ function formatErrorMessage(error) {
 
 // Main SQL interface function
 export async function gcpSQL(args) {
-  // Validate that either operation or query is provided (but not both)
-  if (!args.operation && !args.query) {
-    throw new Error('Either operation or query must be provided');
-  }
-  if (args.operation && args.query) {
-    throw new Error('Cannot provide both operation and query');
-  }
-  
   try {
     const projectId = await getProjectId(args.projectId);
     log(`Executing SQL operation in project: ${projectId}`);
