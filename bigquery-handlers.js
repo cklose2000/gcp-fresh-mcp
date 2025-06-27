@@ -22,6 +22,9 @@ export function getBigQueryToolNames() {
 // Route BigQuery tool calls to appropriate handlers
 export async function routeBigQueryTool(toolName, args) {
   try {
+    // Ensure BigQuery is initialized before any operation
+    await bqEnhanced.ensureInitialized();
+    
     switch (toolName) {
       case 'bq-list-datasets':
         return await bqEnhanced.bqListDatasets(args);
@@ -40,6 +43,19 @@ export async function routeBigQueryTool(toolName, args) {
     }
   } catch (error) {
     console.error(`Error in BigQuery tool ${toolName}:`, error);
-    throw error;
+    
+    // If the error has already been formatted by our enhanced error handling,
+    // return it as is. Otherwise, create a proper error response.
+    if (error.content) {
+      return error;
+    }
+    
+    // Return error in MCP format
+    return {
+      content: [{
+        type: "text",
+        text: `Error executing ${toolName}: ${error.message}`
+      }]
+    };
   }
 }
