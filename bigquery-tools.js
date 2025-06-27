@@ -2,22 +2,40 @@
 export const allBigQueryTools = [
   {
     name: "gcp-sql",
-    description: "Universal SQL interface for BigQuery operations using INFORMATION_SCHEMA - replaces multiple tools with a single efficient interface",
+    description: `Universal SQL interface for BigQuery operations. PREFER THIS TOOL for all BigQuery operations.
+
+COMMON USE CASES:
+• List all datasets: operation='list-datasets'
+• List tables in a dataset: operation='list-tables' (requires 'dataset' parameter)
+• Get table schema: operation='describe-table' or 'table-schema' (requires 'dataset' and 'table')
+• Get dataset info: operation='dataset-info' (requires 'dataset')
+• List views: operation='list-views' (requires 'dataset')
+• View job history: operation='job-history'
+• Get current project: operation='current-project'
+• Run custom SQL: query='SELECT * FROM dataset.table'
+
+EXAMPLES:
+- List datasets: { "operation": "list-datasets" }
+- List tables: { "operation": "list-tables", "dataset": "my_dataset" }
+- Table schema: { "operation": "describe-table", "dataset": "my_dataset", "table": "my_table" }
+- Custom query: { "query": "SELECT COUNT(*) FROM \`project.dataset.table\`" }
+
+NOTE: Use predefined operations when available for better performance. They use optimized INFORMATION_SCHEMA queries.`,
     inputSchema: {
       type: "object",
       properties: {
         operation: {
           type: "string",
           enum: [
-            "list-datasets",
-            "list-tables", 
-            "describe-table",
-            "table-schema",
-            "dataset-info",
-            "list-views",
-            "list-routines",
-            "job-history",
-            "current-project"
+            "list-datasets",      // List all datasets in the project
+            "list-tables",        // List tables in a dataset (requires 'dataset' param)
+            "describe-table",     // Get detailed table schema (requires 'dataset' and 'table' params)
+            "table-schema",       // Alias for describe-table (requires 'dataset' and 'table' params)
+            "dataset-info",       // Get dataset metadata (requires 'dataset' param)
+            "list-views",         // List views in a dataset (requires 'dataset' param)
+            "list-routines",      // List stored procedures/functions (requires 'dataset' param)
+            "job-history",        // Get recent query job history (use 'hours' and 'limit' params)
+            "current-project"     // Get the current GCP project ID
           ],
           description: "Pre-defined operation using INFORMATION_SCHEMA queries"
         },
@@ -67,13 +85,16 @@ export const allBigQueryTools = [
           description: "Limit for job history results (for job-history operation)",
           default: 100
         }
-      }
-      // anyOf removed - validation will be handled in the implementation
+      },
+      anyOf: [
+        { required: ["operation"] },
+        { required: ["query"] }
+      ]
     }
   },
   {
     name: "bq-list-datasets",
-    description: "List all BigQuery datasets in a project",
+    description: "List all BigQuery datasets in a project (LEGACY - prefer 'gcp-sql' with operation='list-datasets')",
     inputSchema: {
       type: "object",
       properties: {
@@ -86,7 +107,7 @@ export const allBigQueryTools = [
   },
   {
     name: "bq-query",
-    description: "Execute a BigQuery SQL query (legacy - use bq_create_query_job for advanced features)",
+    description: "Execute a BigQuery SQL query (LEGACY - prefer 'gcp-sql' with 'query' parameter for better performance)",
     inputSchema: {
       type: "object",
       properties: {
@@ -132,7 +153,7 @@ export const allBigQueryTools = [
   },
   {
     name: "bq-list-tables",
-    description: "List tables in a BigQuery dataset",
+    description: "List tables in a BigQuery dataset (LEGACY - prefer 'gcp-sql' with operation='list-tables')",
     inputSchema: {
       type: "object",
       properties: {
