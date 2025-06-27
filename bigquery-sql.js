@@ -370,6 +370,14 @@ function formatErrorMessage(error) {
 
 // Main SQL interface function
 export async function gcpSQL(args) {
+  // Validate that either operation or query is provided (but not both)
+  if (!args.operation && !args.query) {
+    throw new Error('Either operation or query must be provided');
+  }
+  if (args.operation && args.query) {
+    throw new Error('Cannot provide both operation and query');
+  }
+  
   try {
     const projectId = await getProjectId(args.projectId);
     log(`Executing SQL operation in project: ${projectId}`);
