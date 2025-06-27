@@ -156,7 +156,8 @@ async function handleGCPTool(toolName, args) {
         return {
           content: [{
             type: "text",
-            text: `Found ${datasetList.length} datasets in project ${projectId}:\n${datasetList.map(ds => `- ${ds.id} (${ds.location}, created: ${ds.created})`).join('\n')}`
+            text: `Found ${datasetList.length} datasets in project ${projectId}:
+${datasetList.map(ds => `- ${ds.id} (${ds.location}, created: ${ds.created})`).join('\n')}`
           }]
         };
       }
@@ -189,7 +190,11 @@ async function handleGCPTool(toolName, args) {
         return {
           content: [{
             type: "text",
-            text: `Query returned ${rows.length} rows${truncated ? ' (showing first 100)' : ''}:\n\`\`\`json\n${JSON.stringify(displayRows, null, 2)}\n\`\`\``
+            text: `Query returned ${rows.length} rows${truncated ? ' (showing first 100)' : ''}:
+
+\`\`\`json
+${JSON.stringify(displayRows, null, 2)}
+\`\`\``
           }]
         };
       }
@@ -237,7 +242,8 @@ async function handleGCPTool(toolName, args) {
         return {
           content: [{
             type: "text",
-            text: `Found ${tableList.length} tables in dataset ${args.datasetId}:\n${tableList.map(t => `- ${t.id} (${t.type}, ${t.rows || 0} rows, ${t.size}MB)`).join('\n')}`
+            text: `Found ${tableList.length} tables in dataset ${args.datasetId}:
+${tableList.map(t => `- ${t.id} (${t.type}, ${t.rows || 0} rows, ${t.size}MB)`).join('\n')}`
           }]
         };
       }
@@ -266,7 +272,8 @@ async function handleGCPTool(toolName, args) {
         return {
           content: [{
             type: "text",
-            text: `Found ${bucketList.length} buckets:\n${bucketList.map(b => `- gs://${b.name} (${b.location}, ${b.storageClass})`).join('\n')}`
+            text: `Found ${bucketList.length} buckets:
+${bucketList.map(b => `- gs://${b.name} (${b.location}, ${b.storageClass})`).join('\n')}`
           }]
         };
       }
@@ -297,7 +304,8 @@ async function handleGCPTool(toolName, args) {
         return {
           content: [{
             type: "text",
-            text: `Found ${fileList.length} files in gs://${args.bucketName}:\n${fileList.map(f => `- ${f.name} (${f.size}KB, ${f.contentType || 'unknown type'})`).join('\n')}`
+            text: `Found ${fileList.length} files in gs://${args.bucketName}:
+${fileList.map(f => `- ${f.name} (${f.size}KB, ${f.contentType || 'unknown type'})`).join('\n')}`
           }]
         };
       }
@@ -330,7 +338,10 @@ async function handleGCPTool(toolName, args) {
         return {
           content: [{
             type: "text",
-            text: `Contents of gs://${args.bucketName}/${args.fileName}${truncated ? ' (truncated)' : ''}:\n\`\`\`\n${displayText}\n\`\`\``
+            text: `Contents of gs://${args.bucketName}/${args.fileName}${truncated ? ' (truncated)' : ''}:
+\`\`\`
+${displayText}
+\`\`\``
           }]
         };
       }
@@ -365,7 +376,8 @@ async function handleGCPTool(toolName, args) {
           return {
             content: [{
               type: "text",
-              text: `Instances in ${args.zone}:\n${instances.map(i => `- ${i.name} (${i.status}, ${i.machineType}, IP: ${i.externalIP})`).join('\n')}`
+              text: `Instances in ${args.zone}:
+${instances.map(i => `- ${i.name} (${i.status}, ${i.machineType}, IP: ${i.externalIP})`).join('\n')}`
             }]
           };
         } else {
@@ -376,7 +388,10 @@ async function handleGCPTool(toolName, args) {
           return {
             content: [{
               type: "text",
-              text: `Please specify a zone. Available zones:\n${zoneList.map(z => `- ${z}`).join('\n')}\n\nExample: use zone "us-central1-a"`
+              text: `Please specify a zone. Available zones:
+${zoneList.map(z => `- ${z}`).join('\n')}
+
+Example: use zone "us-central1-a"`
             }]
           };
         }
@@ -444,7 +459,8 @@ async function handleGCPTool(toolName, args) {
           return {
             content: [{
               type: "text",
-              text: `Cloud Run services in ${args.region}:\n${services.map(s => `- ${s.name} ${s.ready ? '✓' : '✗'} ${s.url || 'No URL'}`).join('\n')}`
+              text: `Cloud Run services in ${args.region}:
+${services.map(s => `- ${s.name} ${s.ready ? '✓' : '✗'} ${s.url || 'No URL'}`).join('\n')}`
             }]
           };
         } catch (error) {
@@ -487,7 +503,8 @@ async function handleGCPTool(toolName, args) {
         return {
           content: [{
             type: "text",
-            text: `Accessible GCP Projects:\n${projectList.map(p => `- ${p.id} "${p.displayName}" (${p.state})`).join('\n')}`
+            text: `Accessible GCP Projects:
+${projectList.map(p => `- ${p.id} "${p.displayName}" (${p.state})`).join('\n')}`
           }]
         };
       }
@@ -517,7 +534,9 @@ async function handleGCPTool(toolName, args) {
           return {
             content: [{
               type: "text",
-              text: `\`\`\`\n${displayOutput}\n\`\`\`${truncated ? '\n(Output truncated)' : ''}`
+              text: `\`\`\`
+${displayOutput}
+\`\`\`${truncated ? '\n(Output truncated)' : ''}`
             }]
           };
         } catch (error) {
@@ -619,11 +638,37 @@ app.post("/mcp", async (req, res) => {
     res.json(response);
   } catch (error) {
     console.error("Error processing request:", error);
-    response.error = {
-      code: -32603,
-      message: "Internal error",
-      data: error.message
-    };
+    
+    // Improved error handling - provide more specific error information
+    const errorCode = error.code || -32603;
+    const errorMessage = error.message || "Internal error";
+    
+    // If the error is already formatted as an MCP response (with content array),
+    // pass it through directly
+    if (error.content && Array.isArray(error.content)) {
+      response.result = error;
+    } else {
+      // Map specific error types to appropriate codes
+      let code = -32603; // Internal error
+      if (error.name === 'BigQueryAuthError') {
+        code = -32002; // Server error
+      } else if (error.name === 'BigQueryPermissionError') {
+        code = -32002; // Server error  
+      } else if (error.name === 'BigQueryAPIError') {
+        code = -32002; // Server error
+      }
+      
+      response.error = {
+        code: code,
+        message: errorMessage,
+        data: {
+          type: error.name || 'Error',
+          details: error.originalError?.message || error.message,
+          stack: process.env.DEBUG_GCP_MCP === 'true' ? error.stack : undefined
+        }
+      };
+    }
+    
     res.json(response);
   }
 });
