@@ -1,15 +1,15 @@
 import { z } from 'zod';
 
-// ===================================================================
+// ===============================================================
 // BigQuery Enhanced Tools - Zod Schemas for MCP Integration
-// ===================================================================
+// ===============================================================
 // This file contains all Zod schemas for BigQuery tools to enable
 // proper parameter validation in the MCP protocol integration.
 // Addresses integration requirements from issue #2.
 
-// ===================================================================
+// ===============================================================
 // SQL-First Universal Interface (NEW - Issue #9 Optimization)
-// ===================================================================
+// ===============================================================
 
 export const GcpSQLSchema = z.object({
   // Core parameters
@@ -43,17 +43,11 @@ export const GcpSQLSchema = z.object({
   // Operation-specific parameters
   hours: z.number().optional().default(24).describe('Hours of job history to retrieve (for job-history operation)'),
   limit: z.number().optional().default(100).describe('Limit for job history results (for job-history operation)')
-}).refine(
-  (data) => data.operation || data.query,
-  {
-    message: "Either 'operation' or 'query' parameter is required",
-    path: ['operation', 'query']
-  }
-);
+});
 
-// ===================================================================
+// ===============================================================
 // Jobs API & Async Operations Schemas
-// ===================================================================
+// ===============================================================
 
 export const BqCreateQueryJobSchema = z.object({
   query: z.string().describe('SQL query to execute'),
@@ -87,9 +81,9 @@ export const BqListJobsSchema = z.object({
   stateFilter: z.enum(['pending', 'running', 'done']).optional().describe('Filter by job state')
 });
 
-// ===================================================================
+// ===============================================================
 // Session Management Schemas
-// ===================================================================
+// ===============================================================
 
 export const BqCreateSessionSchema = z.object({
   location: z.string().optional().default('US').describe('Session location (default: US)'),
@@ -102,16 +96,16 @@ export const BqQueryWithSessionSchema = z.object({
   location: z.string().optional().describe('Query location')
 });
 
-// ===================================================================
+// ===============================================================
 // Stored Procedures & Scripts Schemas
-// ===================================================================
+// ===============================================================
 
 export const BqExecuteProcedureSchema = z.object({
   procedureName: z.string().describe('Procedure name'),
   datasetId: z.string().describe('Dataset containing the procedure'),
   projectId: z.string().describe('GCP Project ID'),
   parameters: z.array(z.object({
-    value: z.union([z.string(), z.number(), z.boolean(), z.array(z.any()), z.object({})]).describe('Parameter value'),
+    value: z.any().describe('Parameter value'),
     type: z.string().describe('Parameter type'),
     name: z.string().optional().describe('Parameter name')
   })).optional().describe('Array of parameters with {value, type, name}'),
@@ -121,7 +115,7 @@ export const BqExecuteProcedureSchema = z.object({
 });
 
 export const BqExecuteScriptSchema = z.object({
-  statements: z.array(z.string()).min(1).describe('Array of SQL statements'),
+  statements: z.array(z.string()).describe('Array of SQL statements'),
   projectId: z.string().describe('GCP Project ID'),
   sessionId: z.string().optional().describe('Optional session ID'),
   location: z.string().optional().describe('Script location'),
@@ -129,9 +123,9 @@ export const BqExecuteScriptSchema = z.object({
   waitForCompletion: z.boolean().optional().default(true).describe('Wait for script completion')
 });
 
-// ===================================================================
+// ===============================================================
 // Data Operations Schemas
-// ===================================================================
+// ===============================================================
 
 export const BqLoadDataSchema = z.object({
   sourceUri: z.string().describe('Source file URI (gs://...)'),
@@ -165,7 +159,7 @@ export const BqExportDataSchema = z.object({
 export const BqStreamInsertSchema = z.object({
   datasetId: z.string().describe('Dataset ID'),
   tableId: z.string().describe('Table ID'),
-  rows: z.array(z.object({})).min(1).describe('Array of row objects to insert'),
+  rows: z.array(z.object({})).describe('Array of row objects to insert'),
   insertIds: z.array(z.string()).optional().describe('Optional insert IDs for deduplication'),
   ignoreUnknownValues: z.boolean().optional().describe('Ignore unknown field values'),
   skipInvalidRows: z.boolean().optional().describe('Skip invalid rows')
@@ -181,9 +175,9 @@ export const BqCopyTableSchema = z.object({
   waitForCompletion: z.boolean().optional().default(true).describe('Wait for copy to complete')
 });
 
-// ===================================================================
+// ===============================================================
 // Schema & Metadata Schemas
-// ===================================================================
+// ===============================================================
 
 export const BqGetTableSchemaSchema = z.object({
   datasetId: z.string().describe('Dataset ID'),
@@ -197,9 +191,9 @@ export const BqGetRoutineDefinitionSchema = z.object({
   projectId: z.string().optional().describe('GCP Project ID (optional)')
 });
 
-// ===================================================================
+// ===============================================================
 // Legacy BigQuery Tools Schemas
-// ===================================================================
+// ===============================================================
 
 export const BqListDatasetsSchema = z.object({
   projectId: z.string().optional().describe('GCP Project ID (optional, uses default if not provided)')
@@ -222,9 +216,9 @@ export const BqListTablesSchema = z.object({
   projectId: z.string().optional().describe('GCP Project ID (optional)')
 });
 
-// ===================================================================
+// ===============================================================
 // Schema Export Map for Easy Access
-// ===================================================================
+// ===============================================================
 
 export const BigQuerySchemas = {
   // NEW: SQL-First Universal Interface
@@ -261,9 +255,9 @@ export const BigQuerySchemas = {
   'bq-list-tables': BqListTablesSchema
 };
 
-// ===================================================================
+// ===============================================================
 // Function Name Mapping (camelCase for imports)
-// ===================================================================
+// ===============================================================
 
 export const FunctionNameMap = {
   'gcp-sql': 'gcpSQL',
