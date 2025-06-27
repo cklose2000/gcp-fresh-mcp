@@ -21,6 +21,9 @@ import {
 // Secret token for MCP endpoint protection
 const MCP_SECRET = process.env.MCP_SECRET || 'change-this-secret-token';
 
+// Control whether OAuth endpoints are enabled (default: disabled for Bearer auth)
+const USE_OAUTH = process.env.USE_OAUTH === 'true';
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -29,8 +32,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/mcp', (req, res, next) => {
   const authHeader = req.headers['authorization'];
   
-  // Skip check for OAuth endpoints (they come first)
-  if (req.path.includes('authorize') || req.path.includes('token') || req.path.includes('register')) {
+  // Skip check for OAuth endpoints only if OAuth is enabled
+  if (USE_OAUTH && (req.path.includes('authorize') || req.path.includes('token') || req.path.includes('register'))) {
     return next();
   }
   
@@ -66,46 +69,48 @@ const getProjectId = async (providedId) => {
   }
 };
 
-// OAuth endpoints (keeping existing implementation)
-app.get("/.well-known/oauth-authorization-server", (req, res) => {
-  const protocol = req.get('x-forwarded-proto') || 'https';
-  const base = `${protocol}://${req.get("host")}`;
-  res.json({
-    issuer: base,
-    authorization_endpoint: `${base}/authorize`,
-    token_endpoint: `${base}/token`,
-    registration_endpoint: `${base}/register`,
-    response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code"],
-    code_challenge_methods_supported: ["S256"]
+// OAuth endpoints - only serve if OAuth is enabled
+if (USE_OAUTH) {
+  app.get("/.well-known/oauth-authorization-server", (req, res) => {
+    const protocol = req.get('x-forwarded-proto') || 'https';
+    const base = `${protocol}://${req.get("host")}`;
+    res.json({
+      issuer: base,
+      authorization_endpoint: `${base}/authorize`,
+      token_endpoint: `${base}/token`,
+      registration_endpoint: `${base}/register`,
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code"],
+      code_challenge_methods_supported: ["S256"]
+    });
   });
-});
 
-app.post("/register", (req, res) => {
-  res.status(201).json({
-    client_id: "mcp-client",
-    client_secret: "not-used",
-    redirect_uris: req.body.redirect_uris || ["http://localhost"]
+  app.post("/register", (req, res) => {
+    res.status(201).json({
+      client_id: "mcp-client",
+      client_secret: "not-used",
+      redirect_uris: req.body.redirect_uris || ["http://localhost"]
+    });
   });
-});
 
-app.get("/authorize", (req, res) => {
-  const { redirect_uri, state } = req.query;
-  if (redirect_uri) {
-    const url = new URL(redirect_uri);
-    url.searchParams.set("code", "dummy-code");
-    if (state) url.searchParams.set("state", state);
-    res.redirect(url.toString());
-  }
-});
-
-app.post("/token", (req, res) => {
-  res.json({
-    access_token: "dummy-token",
-    token_type: "Bearer",
-    expires_in: 3600
+  app.get("/authorize", (req, res) => {
+    const { redirect_uri, state } = req.query;
+    if (redirect_uri) {
+      const url = new URL(redirect_uri);
+      url.searchParams.set("code", "dummy-code");
+      if (state) url.searchParams.set("state", state);
+      res.redirect(url.toString());
+    }
   });
-});
+
+  app.post("/token", (req, res) => {
+    res.json({
+      access_token: "dummy-token",
+      token_type: "Bearer",
+      expires_in: 3600
+    });
+  });
+}
 
 // MCP handshake
 app.get("/mcp", (req, res) => {
@@ -682,6 +687,7 @@ app.all("*", (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`✅ GCP MCP server on port ${PORT}`);
+  console.log(`OAuth endpoints: ${USE_OAUTH ? 'ENABLED' : 'DISABLED (using Bearer token auth)'}`);
   console.log("Enhanced BigQuery capabilities: Jobs API, Sessions, Stored Procedures, Data Loading, and more!");
   console.log("Available tools: BigQuery, Cloud Storage, Compute Engine, Cloud Run, and more!");
 });
