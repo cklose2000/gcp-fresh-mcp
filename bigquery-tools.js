@@ -85,11 +85,8 @@ NOTE: Use predefined operations when available for better performance. They use 
           description: "Limit for job history results (for job-history operation)",
           default: 100
         }
-      },
-      anyOf: [
-        { required: ["operation"] },
-        { required: ["query"] }
-      ]
+      }
+      // anyOf removed - validation is handled in the implementation
     }
   },
   {
