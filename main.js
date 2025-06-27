@@ -50,12 +50,17 @@ app.get("/.well-known/oauth-authorization-server", (req, res) => {
 app.use('/mcp', (req, res, next) => {
   const authHeader = req.headers['authorization'];
   
-  // Skip check for OAuth endpoints only if OAuth is enabled
-  if (USE_OAUTH && (req.path.includes('authorize') || req.path.includes('token') || req.path.includes('register'))) {
+  // For OAuth endpoints, check if OAuth is enabled first
+  if (req.path.includes('register') || req.path.includes('authorize') || req.path.includes('token')) {
+    if (!USE_OAUTH) {
+      // Let these requests through so they can return proper 404s
+      return next();
+    }
+    // If OAuth is enabled, skip auth check for these endpoints
     return next();
   }
   
-  // Check secret for MCP endpoints
+  // Check secret for all other MCP endpoints
   if (authHeader !== `Bearer ${MCP_SECRET}`) {
     console.log('Unauthorized access attempt from:', req.ip);
     return res.status(401).json({ error: 'Unauthorized' });
@@ -87,7 +92,43 @@ const getProjectId = async (providedId) => {
   }
 };
 
-// OAuth endpoints - only serve if OAuth is enabled
+// OAuth endpoints - only serve if OAuth is enabled, otherwise return 404
+app.post("/mcp/register", (req, res) => {
+  if (!USE_OAUTH) {
+    return res.status(404).json({ error: "OAuth not supported" });
+  }
+  res.status(201).json({
+    client_id: "mcp-client",
+    client_secret: "not-used",
+    redirect_uris: req.body.redirect_uris || ["http://localhost"]
+  });
+});
+
+app.get("/mcp/authorize", (req, res) => {
+  if (!USE_OAUTH) {
+    return res.status(404).json({ error: "OAuth not supported" });
+  }
+  const { redirect_uri, state } = req.query;
+  if (redirect_uri) {
+    const url = new URL(redirect_uri);
+    url.searchParams.set("code", "dummy-code");
+    if (state) url.searchParams.set("state", state);
+    res.redirect(url.toString());
+  }
+});
+
+app.post("/mcp/token", (req, res) => {
+  if (!USE_OAUTH) {
+    return res.status(404).json({ error: "OAuth not supported" });
+  }
+  res.json({
+    access_token: "dummy-token",
+    token_type: "Bearer",
+    expires_in: 3600
+  });
+});
+
+// Legacy OAuth endpoints at root level for backward compatibility
 if (USE_OAUTH) {
   app.post("/register", (req, res) => {
     res.status(201).json({
