@@ -67,11 +67,8 @@ export const allBigQueryTools = [
           description: "Limit for job history results (for job-history operation)",
           default: 100
         }
-      },
-      anyOf: [
-        { required: ["operation"] },
-        { required: ["query"] }
-      ]
+      }
+      // anyOf removed - validation will be handled in the implementation
     }
   },
   {
